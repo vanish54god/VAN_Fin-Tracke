@@ -1,10 +1,13 @@
 import asyncio
 import os
 from dotenv import load_dotenv
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
 
 import database as db
+from states import TransactionForm
+from keyboards import type_keyboard, categories_keyboard
 
 # Загружаем переменные из .env файла
 load_dotenv()
@@ -33,6 +36,66 @@ async def cmd_start(message: types.Message):
     else:
         await message.answer(f"С возвращением, {username}!")
 
+# Шаг 1: пользователь вызывает команду добавления транзакции
+@dp.message(F.text == "/add")
+async def cmd_add_transaction(message: types.Message, state: FSMContext):
+    await state.set_state(TransactionForm.choosing_type)
+    await message.answer("Это трата или доход?", reply_markup=type_keyboard())
+
+# Шаг 2: пользователь нажал кнопку "Трата" или "Доход"
+@dp.callback_query(TransactionForm.choosing_type, F.data.startswith("type_"))
+async def process_type(callback: types.CallbackQuery, state: FSMContext):
+    chosen_type = callback.data.split("_")[1]  # "expense" или "income"
+    await state.update_data(type=chosen_type)
+
+    user = db.get_user(callback.from_user.id)
+    categories = db.get_categories(user[0], cat_type=chosen_type)
+
+    await state.set_state(TransactionForm.choosing_category)
+    await callback.message.edit_text("Выбери категорию:", reply_markup=categories_keyboard(categories))
+    await callback.answer()  # убирает "часики" на кнопке в Telegram
+
+# Шаг 3: пользователь выбрал категорию
+@dp.callback_query(TransactionForm.choosing_category, F.data.startswith("cat_"))
+async def process_category(callback: types.CallbackQuery, state: FSMContext):
+    category_id = int(callback.data.split("_")[1])
+    await state.update_data(category_id=category_id)
+
+    await state.set_state(TransactionForm.entering_amount)
+    await callback.message.edit_text("Введи сумму:")
+    await callback.answer()
+
+# Шаг 4: пользователь вводит сумму текстом
+@dp.message(TransactionForm.entering_amount)
+async def process_amount(message: types.Message, state: FSMContext):
+    try:
+        amount = float(message.text)
+    except ValueError:
+        await message.answer("Это не похоже на число. Попробуй ещё раз, например: 500 или 199.99")
+        return
+
+    await state.update_data(amount=amount)
+    await state.set_state(TransactionForm.entering_description)
+    await message.answer("Добавь комментарий (или напиши «-», если не нужен):")
+
+# Шаг 5: пользователь вводит комментарий — и мы сохраняем всё в базу
+@dp.message(TransactionForm.entering_description)
+async def process_description(message: types.Message, state: FSMContext):
+    description = None if message.text.strip() == "-" else message.text
+
+    data = await state.get_data()
+    user = db.get_user(message.from_user.id)
+
+    db.add_transaction(
+        user_id=user[0],
+        category_id=data["category_id"],
+        amount=data["amount"],
+        description=description
+    )
+
+    await state.clear()
+    await message.answer("Записал! ✅")
+    
 # Обработчик любого текстового сообщения (кроме команд)
 @dp.message()
 async def echo(message: types.Message):

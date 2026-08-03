@@ -161,5 +161,33 @@ def get_categories(user_id, cat_type=None):
     conn.close()
     return categories
 
+def add_transaction(user_id, category_id, amount, description=None):
+    """Добавляет запись о доходе или трате"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO transactions (user_id, category_id, amount, description) VALUES (?, ?, ?, ?)",
+        (user_id, category_id, amount, description)
+    )
+    conn.commit()
+    conn.close()
+
+def get_transactions(user_id, limit=10):
+    """Возвращает последние транзакции пользователя вместе с названием категории"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT transactions.id, transactions.amount, categories.name, 
+               categories.type, transactions.date, transactions.description
+        FROM transactions
+        JOIN categories ON transactions.category_id = categories.id
+        WHERE transactions.user_id = ?
+        ORDER BY transactions.date DESC
+        LIMIT ?
+    """, (user_id, limit))
+    result = cursor.fetchall()
+    conn.close()
+    return result
+
 if __name__ == "__main__":
     init_db()
