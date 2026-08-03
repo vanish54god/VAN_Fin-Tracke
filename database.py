@@ -83,7 +83,7 @@ def init_db():
 
     conn.commit()
     conn.close()
-    print("База данных успешно создана!")
+    print("База данных готова к работе!")
 
 def add_user(telegram_id, username):
     """Добавляет нового пользователя, если его ещё нет"""
