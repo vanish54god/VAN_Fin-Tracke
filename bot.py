@@ -95,7 +95,27 @@ async def process_description(message: types.Message, state: FSMContext):
 
     await state.clear()
     await message.answer("Записал! ✅")
-    
+
+@dp.message(F.text == "/history")
+async def cmd_history(message: types.Message):
+    user = db.get_user(message.from_user.id)
+    transactions = db.get_transactions(user[0], limit=10)
+
+    if not transactions:
+        await message.answer("Пока нет ни одной записи. Добавь первую через /add")
+        return
+
+    lines = ["Последние операции:\n"]
+    for tx in transactions:
+        tx_id, amount, category_name, category_type, date, description = tx
+        sign = "+" if category_type == "income" else "-"
+        line = f"{sign}{amount} — {category_name} ({date[:10]})"
+        if description:
+            line += f"\n   💬 {description}"
+        lines.append(line)
+
+    await message.answer("\n".join(lines))
+        
 # Обработчик любого текстового сообщения (кроме команд)
 @dp.message()
 async def echo(message: types.Message):
