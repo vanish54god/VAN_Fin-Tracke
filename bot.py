@@ -94,7 +94,23 @@ async def process_description(message: types.Message, state: FSMContext):
     )
 
     await state.clear()
-    await message.answer("Записал! ✅")
+
+    if data["type"] == "expense" and user[3] is not None:  # user[3] — daily_limit
+        spent_today = db.get_today_spent(user[0])
+        remaining = user[3] - spent_today
+
+        if remaining < 0:
+            await message.answer(
+                f"Записал! ✅\n"
+                f"⚠️ Дневной лимит превышен на {abs(remaining):.2f}"
+            )
+        else:
+            await message.answer(
+                f"Записал! ✅\n"
+                f"Осталось на сегодня: {remaining:.2f} из {user[3]}"
+            )
+    else:
+        await message.answer("Записал! ✅")
 
 @dp.message(F.text == "/history")
 async def cmd_history(message: types.Message):
@@ -115,7 +131,25 @@ async def cmd_history(message: types.Message):
         lines.append(line)
 
     await message.answer("\n".join(lines))
-        
+
+@dp.message(F.text.startswith("/setlimit"))
+async def cmd_set_limit(message: types.Message):
+    parts = message.text.split()
+
+    if len(parts) != 2:
+        await message.answer("Использование: /setlimit 1500\n(укажи сумму дневного лимита после команды)")
+        return
+
+    try:
+        limit_amount = float(parts[1])
+    except ValueError:
+        await message.answer("Это не похоже на число. Пример: /setlimit 1500")
+        return
+
+    user = db.get_user(message.from_user.id)
+    db.set_daily_limit(user[0], limit_amount)
+    await message.answer(f"Дневной лимит установлен: {limit_amount}")
+
 # Обработчик любого текстового сообщения (кроме команд)
 @dp.message()
 async def echo(message: types.Message):

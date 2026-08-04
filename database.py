@@ -108,6 +108,33 @@ def get_user(telegram_id):
     conn.close()
     return user
 
+def set_daily_limit(user_id, limit_amount):
+    """Устанавливает дневной лимит трат для пользователя"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET daily_limit = ? WHERE id = ?",
+        (limit_amount, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+def get_today_spent(user_id):
+    """Возвращает сумму всех трат за сегодня"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COALESCE(SUM(transactions.amount), 0)
+        FROM transactions
+        JOIN categories ON transactions.category_id = categories.id
+        WHERE transactions.user_id = ?
+          AND categories.type = 'expense'
+          AND DATE(transactions.date, 'localtime') = DATE('now', 'localtime')
+    """, (user_id,))
+    result = cursor.fetchone()[0]
+    conn.close()
+    return result
+
 DEFAULT_CATEGORIES = [
     ("Еда", "expense"),
     ("Транспорт", "expense"),
