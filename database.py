@@ -205,7 +205,7 @@ def get_transactions(user_id, limit=10):
     cursor = conn.cursor()
     cursor.execute("""
         SELECT transactions.id, transactions.amount, categories.name, 
-               categories.type, transactions.date, transactions.description
+               categories.type, DATETIME(transactions.date, 'localtime'), transactions.description
         FROM transactions
         JOIN categories ON transactions.category_id = categories.id
         WHERE transactions.user_id = ?
