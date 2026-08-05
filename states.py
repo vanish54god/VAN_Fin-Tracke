@@ -5,3 +5,7 @@ class TransactionForm(StatesGroup):
     choosing_category = State()
     entering_amount = State()
     entering_description = State()
+class SavingsForm(StatesGroup):
+    entering_title = State()
+    choosing_type = State()
+    entering_amount = State()    

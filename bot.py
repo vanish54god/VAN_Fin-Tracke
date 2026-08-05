@@ -6,8 +6,11 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 
 import database as db
-from states import TransactionForm
-from keyboards import type_keyboard, categories_keyboard
+from states import TransactionForm, SavingsForm
+from keyboards import (
+    type_keyboard, categories_keyboard,
+    savings_list_keyboard, savings_type_keyboard, savings_action_keyboard
+)
 
 # Загружаем переменные из .env файла
 load_dotenv()
@@ -149,6 +152,113 @@ async def cmd_set_limit(message: types.Message):
     user = db.get_user(message.from_user.id)
     db.set_daily_limit(user[0], limit_amount)
     await message.answer(f"Дневной лимит установлен: {limit_amount}")
+
+@dp.message(F.text == "/savings")
+async def cmd_savings(message: types.Message):
+    user = db.get_user(message.from_user.id)
+    savings = db.get_savings(user[0])
+
+    if not savings:
+        await message.answer(
+            "У тебя пока нет накоплений или вложений.",
+            reply_markup=savings_list_keyboard(savings)
+        )
+        return
+
+    total = sum(s[3] for s in savings)  # s[3] — amount
+    await message.answer(
+        f"Твои накопления и вложения (всего: {total:.2f}):\nВыбери, с чем работать:",
+        reply_markup=savings_list_keyboard(savings)
+    )
+
+@dp.callback_query(F.data == "saving_new")
+async def process_saving_new(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(SavingsForm.entering_title)
+    await callback.message.edit_text("Как назовём? Например: «Вклад в банке» или «Акции Apple»")
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("saving_") & ~F.data.startswith("saving_new"))
+async def process_saving_select(callback: types.CallbackQuery):
+    saving_id = int(callback.data.split("_")[1])
+    saving = db.get_saving_by_id(saving_id)
+
+    await callback.message.edit_text(
+        f"«{saving[2]}»\nТекущая сумма: {saving[3]:.2f}\nЧто делаем?",
+        reply_markup=savings_action_keyboard(saving_id)
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("savaction_"))
+async def process_saving_action(callback: types.CallbackQuery, state: FSMContext):
+    _, action, saving_id = callback.data.split("_")
+    saving_id = int(saving_id)
+
+    await state.set_state(SavingsForm.entering_amount)
+    await state.update_data(saving_id=saving_id, action=action)
+
+    verb = "пополнить" if action == "add" else "снять"
+    await callback.message.edit_text(f"Сколько хочешь {verb}?")
+    await callback.answer()
+    
+@dp.message(SavingsForm.entering_title)
+async def process_saving_title(message: types.Message, state: FSMContext):
+    await state.update_data(title=message.text)
+    await state.set_state(SavingsForm.choosing_type)
+    await message.answer("Это накопление или вложение?", reply_markup=savings_type_keyboard())
+
+@dp.callback_query(SavingsForm.choosing_type, F.data.startswith("savtype_"))
+async def process_saving_type(callback: types.CallbackQuery, state: FSMContext):
+    saving_type = callback.data.split("_")[1]  # "savings" или "investment"
+    data = await state.get_data()
+
+    user = db.get_user(callback.from_user.id)
+    saving_id = db.add_saving(user[0], data["title"], saving_type)
+
+    await state.clear()
+    await callback.message.edit_text(
+        f"Создал «{data['title']}»! Теперь пополни его — введи сумму:"
+    )
+    await state.set_state(SavingsForm.entering_amount)
+    await state.update_data(saving_id=saving_id, action="add")
+    await callback.answer()
+
+@dp.message(SavingsForm.entering_amount)
+async def process_saving_amount(message: types.Message, state: FSMContext):
+    try:
+        amount = float(message.text)
+    except ValueError:
+        await message.answer("Это не похоже на число. Попробуй ещё раз, например: 500")
+        return
+
+    data = await state.get_data()
+    saving_id = data["saving_id"]
+    action = data["action"]  # "add" или "withdraw"
+
+    user = db.get_user(message.from_user.id)
+    saving = db.get_saving_by_id(saving_id)
+
+    if action == "withdraw" and amount > saving[3]:  # saving[3] — текущая сумма
+        await message.answer(
+            f"На счету только {saving[3]:.2f}, не могу снять {amount:.2f}. Введи сумму меньше."
+        )
+        return
+
+    delta = amount if action == "add" else -amount
+    db.update_saving_amount(saving_id, delta)
+
+    # Автоматически создаём связанную транзакцию, чтобы бюджет оставался честным
+    category_name = "Накопления" if action == "add" else "Снятие с накоплений"
+    category = db.get_category_by_name(user[0], category_name)
+    db.add_transaction(
+        user_id=user[0],
+        category_id=category[0],
+        amount=amount,
+        description=f"{'Пополнение' if action == 'add' else 'Снятие'}: {saving[2]}"
+    )
+
+    await state.clear()
+    verb = "Пополнил" if action == "add" else "Снял с"
+    await message.answer(f"{verb} «{saving[2]}» на {amount:.2f} ✅")
 
 # Обработчик любого текстового сообщения (кроме команд)
 @dp.message()

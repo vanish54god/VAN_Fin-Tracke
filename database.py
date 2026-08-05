@@ -142,9 +142,11 @@ DEFAULT_CATEGORIES = [
     ("Жильё", "expense"),
     ("Здоровье", "expense"),
     ("Прочее", "expense"),
+    ("Накопления", "expense"),
     ("Зарплата", "income"),
     ("Подарки", "income"),
     ("Прочий доход", "income"),
+    ("Снятие с накоплений", "income"),
 ]
 
 def add_default_categories(user_id):
@@ -213,6 +215,60 @@ def get_transactions(user_id, limit=10):
         LIMIT ?
     """, (user_id, limit))
     result = cursor.fetchall()
+    conn.close()
+    return result
+
+def add_saving(user_id, title, saving_type):
+    """Создаёт новую запись накопления/вложения с нулевым балансом"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO savings (user_id, title, amount, type) VALUES (?, ?, 0, ?)",
+        (user_id, title, saving_type)
+    )
+    conn.commit()
+    saving_id = cursor.lastrowid
+    conn.close()
+    return saving_id
+
+def get_savings(user_id):
+    """Возвращает список всех накоплений/вложений пользователя"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM savings WHERE user_id = ?", (user_id,))
+    result = cursor.fetchall()
+    conn.close()
+    return result
+
+def get_saving_by_id(saving_id):
+    """Возвращает одну запись накопления по её id"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM savings WHERE id = ?", (saving_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result
+
+def update_saving_amount(saving_id, delta):
+    """Изменяет сумму накопления на delta (может быть отрицательным при снятии)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE savings SET amount = amount + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (delta, saving_id)
+    )
+    conn.commit()
+    conn.close()
+
+def get_category_by_name(user_id, name):
+    """Находит категорию пользователя по точному названию"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM categories WHERE user_id = ? AND name = ?",
+        (user_id, name)
+    )
+    result = cursor.fetchone()
     conn.close()
     return result
 
